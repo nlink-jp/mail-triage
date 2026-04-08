@@ -48,7 +48,8 @@ source "$CONFIG_FILE"
 : "${JOB_MEMORY:=512Mi}"
 : "${JOB_CPU:=1}"
 
-SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+_IAM_DOMAIN="iam.gserviceaccount.com"
+SA_EMAIL="${SA_NAME}@${PROJECT_ID}.${_IAM_DOMAIN}"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${JOB_NAME}:latest"
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 
@@ -185,7 +186,7 @@ fi
 step "Setting up Eventarc trigger"
 
 # Grant Eventarc permissions to GCS service account
-GCS_SA="service-${PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com"
+GCS_SA="service-${PROJECT_NUMBER}@gs-project-accounts.${_IAM_DOMAIN}"
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${GCS_SA}" \
   --role="roles/pubsub.publisher" \
