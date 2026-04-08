@@ -114,9 +114,14 @@ def post_analysis(email_data: EmailData, analysis: AnalysisResult, config: Confi
             blocks=blocks,
             text=f"{CATEGORY_EMOJI.get(analysis.category, '')} {email_data.subject}",
         )
+    except SlackApiError as e:
+        logger.error("Slack post failed: %s", e.response["error"])
+        raise
 
-        # Post email body as thread reply (file upload)
-        if email_data.body and result.get("ts"):
+    # Post email body as thread reply (file upload).
+    # This is best-effort — if it fails, the main notification already succeeded.
+    if email_data.body and result.get("ts"):
+        try:
             client.files_upload_v2(
                 channel=config.slack_channel,
                 thread_ts=result["ts"],
@@ -124,9 +129,11 @@ def post_analysis(email_data: EmailData, analysis: AnalysisResult, config: Confi
                 filename=f"{email_data.source_file}.body.txt",
                 title="Email Body",
             )
-    except SlackApiError as e:
-        logger.error("Slack post failed: %s", e.response["error"])
-        raise
+        except SlackApiError as e:
+            logger.warning(
+                "Thread file upload failed (main message posted successfully): %s",
+                e.response.get("error", str(e)),
+            )
 
 
 def post_failure(email_data: EmailData, error: str, config: Config) -> None:

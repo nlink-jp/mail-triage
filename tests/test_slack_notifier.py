@@ -1,11 +1,15 @@
 """Tests for Slack Block Kit payload construction."""
 
+from unittest.mock import MagicMock, patch
+
+from mail_triage.config import Config
 from mail_triage.models import AnalysisResult, Category, EmailData, Priority
 from mail_triage.slack.notifier import (
     CATEGORY_EMOJI,
     PRIORITY_EMOJI,
     _build_failure_blocks,
     _build_success_blocks,
+    post_analysis,
 )
 
 
@@ -90,3 +94,39 @@ class TestBuildFailureBlocks:
         blocks = _build_failure_blocks(_sample_email(), "error")
         section = blocks[2]
         assert "alert.eml" in section["fields"][1]["text"]
+
+
+class TestPostAnalysisFileUploadRecovery:
+    """Thread file upload failure must not break the main notification."""
+
+    @patch("mail_triage.slack.notifier._get_client")
+    def test_file_upload_failure_does_not_raise(self, mock_get_client):
+        from slack_sdk.errors import SlackApiError
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.chat_postMessage.return_value = {"ts": "1234567890.123456"}
+        mock_client.files_upload_v2.side_effect = SlackApiError(
+            message="upload_error", response=MagicMock(data={"error": "file_upload_failed"})
+        )
+
+        config = Config(bucket="b", project="p", slack_bot_token="xoxb-test", slack_channel="#test")
+        # Should NOT raise even though files_upload_v2 fails
+        post_analysis(_sample_email(), _sample_analysis(), config)
+
+        mock_client.chat_postMessage.assert_called_once()
+        mock_client.files_upload_v2.assert_called_once()
+
+    @patch("mail_triage.slack.notifier._get_client")
+    def test_file_upload_success(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.chat_postMessage.return_value = {"ts": "1234567890.123456"}
+
+        config = Config(bucket="b", project="p", slack_bot_token="xoxb-test", slack_channel="#test")
+        post_analysis(_sample_email(), _sample_analysis(), config)
+
+        mock_client.files_upload_v2.assert_called_once()
+        call_kwargs = mock_client.files_upload_v2.call_args[1]
+        assert call_kwargs["thread_ts"] == "1234567890.123456"
+        assert call_kwargs["filename"].endswith(".body.txt")
