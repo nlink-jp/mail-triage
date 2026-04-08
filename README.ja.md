@@ -140,4 +140,5 @@ make build   # dist/ にホイールをビルド
 
 - [README.md](README.md)（English）
 - [README.ja.md](README.ja.md)（日本語）
+- [How to Setup](docs/setup.md)（GCP / Slack 事前準備）
 - [CHANGELOG.md](CHANGELOG.md)

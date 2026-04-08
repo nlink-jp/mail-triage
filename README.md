@@ -141,4 +141,5 @@ make build   # Build wheel to dist/
 
 - [README.md](README.md) (English)
 - [README.ja.md](README.ja.md) (Japanese)
+- [How to Setup](docs/setup.md) (GCP / Slack prerequisites)
 - [CHANGELOG.md](CHANGELOG.md)
