@@ -10,6 +10,9 @@ from mail_triage.models import EmailData
 
 logger = logging.getLogger(__name__)
 
+# Maximum body size to prevent OOM on huge emails.
+_MAX_BODY_BYTES = 1_000_000  # 1 MB
+
 
 class _HTMLTextExtractor(HTMLParser):
     """Strip HTML tags and extract plain text."""
@@ -62,7 +65,7 @@ def parse_msg(data: bytes, source_file: str = "") -> EmailData:
             subject=subject,
             sender=sender,
             date=str(date),
-            body=body,
+            body=body[:_MAX_BODY_BYTES],
             source_file=source_file,
         )
     finally:

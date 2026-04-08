@@ -11,6 +11,10 @@ from io import StringIO
 
 from mail_triage.models import EmailData
 
+# Maximum body size to prevent OOM on huge emails.
+# LLM prompt truncates further, but this prevents holding gigabytes in memory.
+_MAX_BODY_BYTES = 1_000_000  # 1 MB
+
 
 class _HTMLTextExtractor(HTMLParser):
     """Strip HTML tags and extract plain text."""
@@ -82,7 +86,7 @@ def parse_eml(data: bytes, source_file: str = "") -> EmailData:
     subject = _decode_header(msg.get("Subject"))
     sender = _decode_header(msg.get("From"))
     date = msg.get("Date", "")
-    body = _extract_body(msg)
+    body = _extract_body(msg)[:_MAX_BODY_BYTES]
 
     return EmailData(
         subject=subject,

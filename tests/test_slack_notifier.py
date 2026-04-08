@@ -9,6 +9,7 @@ from mail_triage.slack.notifier import (
     PRIORITY_EMOJI,
     _build_failure_blocks,
     _build_success_blocks,
+    _escape_mrkdwn,
     post_analysis,
 )
 
@@ -94,6 +95,36 @@ class TestBuildFailureBlocks:
         blocks = _build_failure_blocks(_sample_email(), "error")
         section = blocks[2]
         assert "alert.eml" in section["fields"][1]["text"]
+
+
+class TestMrkdwnEscape:
+    def test_escapes_bold(self):
+        assert _escape_mrkdwn("*bold*") == "\\*bold\\*"
+
+    def test_escapes_italic(self):
+        assert _escape_mrkdwn("_italic_") == "\\_italic\\_"
+
+    def test_escapes_code(self):
+        assert _escape_mrkdwn("`code`") == "\\`code\\`"
+
+    def test_escapes_link_brackets(self):
+        assert _escape_mrkdwn("[text](url)") == "\\[text\\](url)"
+
+    def test_no_escape_plain_text(self):
+        assert _escape_mrkdwn("hello world") == "hello world"
+
+    def test_sender_escaped_in_success_blocks(self):
+        email = _sample_email()
+        email.sender = "*Admin* <admin@test.com>"
+        blocks = _build_success_blocks(email, _sample_analysis())
+        from_field = blocks[2]["fields"][0]["text"]
+        assert "\\*Admin\\*" in from_field
+
+    def test_error_escaped_in_failure_blocks(self):
+        blocks = _build_failure_blocks(_sample_email(), "Error: `unexpected` *token*")
+        error_text = blocks[3]["elements"][0]["text"]
+        assert "\\`unexpected\\`" in error_text
+        assert "\\*token\\*" in error_text
 
 
 class TestPostAnalysisFileUploadRecovery:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 
+from google.api_core.exceptions import NotFound
+
 from mail_triage.config import Config
 from mail_triage.gcs.client import GCSClient
 from mail_triage.llm.analyzer import analyze_email
@@ -23,7 +25,7 @@ def process_single_file(blob_name: str, config: Config, gcs_client: GCSClient) -
     2. Parse email (eml/msg)
     3. Analyze with LLM
     4. Post result to Slack
-    5. Move to processed prefix
+    5. Move to processed prefix (only if notification succeeded or Slack is unconfigured)
     """
     filename = os.path.basename(blob_name)
     logger.info("Processing: %s", blob_name)
@@ -31,6 +33,14 @@ def process_single_file(blob_name: str, config: Config, gcs_client: GCSClient) -
     # 1. Download
     try:
         data = gcs_client.download(blob_name)
+    except NotFound:
+        logger.warning("Blob %s no longer exists (already processed by another run), skipping", blob_name)
+        return ProcessResult(
+            source_path=blob_name,
+            email=EmailData(source_file=filename),
+            error=None,
+            success=True,
+        )
     except Exception as e:
         logger.error("Failed to download %s: %s", blob_name, e)
         return ProcessResult(
@@ -68,17 +78,22 @@ def process_single_file(blob_name: str, config: Config, gcs_client: GCSClient) -
         logger.error("LLM analysis failed for %s: %s", blob_name, e)
 
     # 4. Post to Slack
-    if not config.dry_run and config.slack_bot_token and config.slack_channel:
+    slack_configured = config.slack_bot_token and config.slack_channel
+    slack_posted = False
+    if not config.dry_run and slack_configured:
         try:
             if analysis:
                 post_analysis(email_data, analysis, config)
             else:
                 post_failure(email_data, analysis_error or "Unknown error", config)
+            slack_posted = True
         except Exception as e:
             logger.error("Slack post failed for %s: %s", blob_name, e)
 
-    # 5. Move to processed (even if analysis failed — parsing succeeded)
-    if not config.dry_run:
+    # 5. Move to processed — only if Slack post succeeded (or Slack is unconfigured/dry-run).
+    #    If Slack post failed, leave in inbox for retry on next sweep.
+    should_move = not config.dry_run and (slack_posted or not slack_configured)
+    if should_move:
         try:
             gcs_client.move_to_processed(blob_name)
         except Exception as e:
@@ -90,6 +105,15 @@ def process_single_file(blob_name: str, config: Config, gcs_client: GCSClient) -
                 error=f"Move failed: {e}",
                 success=False,
             )
+
+    if not config.dry_run and slack_configured and not slack_posted:
+        return ProcessResult(
+            source_path=blob_name,
+            email=email_data,
+            analysis=analysis,
+            error="Slack notification failed, file left in inbox for retry",
+            success=False,
+        )
 
     return ProcessResult(
         source_path=blob_name,

@@ -128,10 +128,17 @@ def analyze_email(email_data: EmailData, config: Config) -> AnalysisResult:
 
             return _parse_response(response.text)
 
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+            # Parse/validation errors are not transient — don't retry
+            logger.error("LLM response parsing failed (not retryable): %s", e)
+            raise
+
         except Exception as e:
             last_error = e
             error_str = str(e).lower()
-            is_retryable = any(k in error_str for k in ["429", "resource_exhausted", "503", "500", "deadline"])
+            is_retryable = any(
+                k in error_str for k in ["429", "resource_exhausted", "503", "500", "deadline", "unavailable"]
+            )
 
             if not is_retryable or attempt == _MAX_RETRIES:
                 logger.error("LLM analysis failed (attempt %d/%d): %s", attempt + 1, _MAX_RETRIES + 1, e)

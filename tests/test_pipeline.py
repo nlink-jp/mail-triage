@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+from google.api_core.exceptions import NotFound
+
 from mail_triage.config import Config
 from mail_triage.models import AnalysisResult, Category, EmailData, Priority
 from mail_triage.pipeline import process_single_file, sweep
@@ -82,6 +84,35 @@ class TestProcessSingleFile:
         assert result.email.subject == "Test Alert"
         assert result.analysis is None
         assert "LLM analysis failed" in result.error
+
+    def test_blob_not_found_skips_gracefully(self):
+        """If blob was already processed by another run, skip without error."""
+        gcs = MagicMock()
+        gcs.download.side_effect = NotFound("blob not found")
+
+        result = process_single_file("inbox/test.eml", _config(), gcs)
+        assert result.success
+        assert result.error is None
+
+    @patch("mail_triage.pipeline.post_analysis")
+    @patch("mail_triage.pipeline.analyze_email")
+    def test_slack_failure_prevents_move(self, mock_analyze, mock_post):
+        """If Slack notification fails, file must NOT be moved to processed."""
+        mock_analyze.return_value = AnalysisResult(
+            category=Category.OTHER, priority=Priority.LOW,
+            summary="test", tags=[], language="en",
+        )
+        mock_post.side_effect = Exception("Slack error")
+
+        gcs = MagicMock()
+        gcs.download.return_value = _sample_eml_bytes()
+
+        config = _config(dry_run=False, slack_bot_token="xoxb-test", slack_channel="#test")
+        result = process_single_file("inbox/test.eml", config, gcs)
+
+        assert not result.success
+        assert "Slack notification failed" in result.error
+        gcs.move_to_processed.assert_not_called()
 
 
 class TestSweep:

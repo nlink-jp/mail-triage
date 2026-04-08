@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from google.api_core.exceptions import NotFound
 from google.cloud import storage
 
 from mail_triage.config import Config
@@ -39,7 +40,11 @@ class GCSClient:
         return sorted(results)
 
     def download(self, blob_name: str) -> bytes:
-        """Download a blob's contents as bytes."""
+        """Download a blob's contents as bytes.
+
+        Raises google.api_core.exceptions.NotFound if the blob does not exist
+        (e.g. already processed by a concurrent run).
+        """
         blob = self._bucket.blob(blob_name)
         data = blob.download_as_bytes()
         logger.info("Downloaded %s (%d bytes)", blob_name, len(data))
@@ -47,6 +52,9 @@ class GCSClient:
 
     def move_to_processed(self, blob_name: str) -> str:
         """Move a blob from input prefix to processed prefix.
+
+        Copy-then-delete is not atomic. If the source blob was already deleted
+        by a concurrent run, the NotFound on delete is logged and ignored.
 
         Returns the new blob name.
         """
@@ -60,6 +68,11 @@ class GCSClient:
 
         source_blob = self._bucket.blob(blob_name)
         self._bucket.copy_blob(source_blob, self._bucket, new_name)
-        source_blob.delete()
+
+        try:
+            source_blob.delete()
+        except NotFound:
+            logger.warning("Source blob %s already deleted (concurrent run), skipping delete", blob_name)
+
         logger.info("Moved %s → %s", blob_name, new_name)
         return new_name

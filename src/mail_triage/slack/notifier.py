@@ -10,6 +10,7 @@ Rate limit handling:
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from slack_sdk import WebClient
@@ -27,6 +28,9 @@ logger = logging.getLogger(__name__)
 _MIN_INTERVAL = 1.5
 _last_call_time: float = 0.0
 
+# Slack mrkdwn special characters that could break formatting
+_MRKDWN_SPECIAL = re.compile(r"([*_~`\[\]|])")
+
 
 def _throttle() -> None:
     """Ensure minimum interval between Slack API calls."""
@@ -38,6 +42,20 @@ def _throttle() -> None:
         logger.debug("Throttling Slack API call for %.1fs", wait)
         time.sleep(wait)
     _last_call_time = time.monotonic()
+
+
+def _escape_mrkdwn(text: str) -> str:
+    """Escape Slack mrkdwn special characters in untrusted text."""
+    return _MRKDWN_SPECIAL.sub(r"\\\1", text)
+
+
+def _slack_error_message(e: SlackApiError) -> str:
+    """Safely extract error message from SlackApiError."""
+    try:
+        return e.response.get("error", str(e))
+    except Exception:
+        return str(e)
+
 
 CATEGORY_EMOJI: dict[Category, str] = {
     Category.SECURITY_ALERT: ":rotating_light:",
@@ -64,6 +82,9 @@ def _build_success_blocks(email_data: EmailData, analysis: AnalysisResult) -> li
     pri_emoji = PRIORITY_EMOJI.get(analysis.priority, ":white_circle:")
     tags_text = ", ".join(f"`{tag}`" for tag in analysis.tags) if analysis.tags else "_none_"
 
+    safe_sender = _escape_mrkdwn(email_data.sender)
+    safe_date = _escape_mrkdwn(email_data.date)
+
     return [
         {
             "type": "header",
@@ -79,8 +100,8 @@ def _build_success_blocks(email_data: EmailData, analysis: AnalysisResult) -> li
         {
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*From:*\n{email_data.sender}"},
-                {"type": "mrkdwn", "text": f"*Date:*\n{email_data.date}"},
+                {"type": "mrkdwn", "text": f"*From:*\n{safe_sender}"},
+                {"type": "mrkdwn", "text": f"*Date:*\n{safe_date}"},
             ],
         },
         {
@@ -98,6 +119,11 @@ def _build_success_blocks(email_data: EmailData, analysis: AnalysisResult) -> li
 
 def _build_failure_blocks(email_data: EmailData, error: str) -> list[dict]:
     """Build Slack Block Kit blocks for a failed analysis."""
+    safe_subject = _escape_mrkdwn(email_data.subject[:140])
+    safe_sender = _escape_mrkdwn(email_data.sender)
+    safe_date = _escape_mrkdwn(email_data.date)
+    safe_error = _escape_mrkdwn(error[:500])
+
     return [
         {
             "type": "header",
@@ -106,21 +132,21 @@ def _build_failure_blocks(email_data: EmailData, error: str) -> list[dict]:
         {
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*Subject:*\n{email_data.subject[:140]}"},
-                {"type": "mrkdwn", "text": f"*From:*\n{email_data.sender}"},
+                {"type": "mrkdwn", "text": f"*Subject:*\n{safe_subject}"},
+                {"type": "mrkdwn", "text": f"*From:*\n{safe_sender}"},
             ],
         },
         {
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*Date:*\n{email_data.date}"},
+                {"type": "mrkdwn", "text": f"*Date:*\n{safe_date}"},
                 {"type": "mrkdwn", "text": f"*File:*\n`{email_data.source_file}`"},
             ],
         },
         {
             "type": "context",
             "elements": [
-                {"type": "mrkdwn", "text": f":warning: {error[:500]}"},
+                {"type": "mrkdwn", "text": f":warning: {safe_error}"},
             ],
         },
     ]
@@ -146,7 +172,7 @@ def post_analysis(email_data: EmailData, analysis: AnalysisResult, config: Confi
             text=f"{CATEGORY_EMOJI.get(analysis.category, '')} {email_data.subject}",
         )
     except SlackApiError as e:
-        logger.error("Slack post failed: %s", e.response["error"])
+        logger.error("Slack post failed: %s", _slack_error_message(e))
         raise
 
     # Post email body as thread reply (file upload).
@@ -164,7 +190,7 @@ def post_analysis(email_data: EmailData, analysis: AnalysisResult, config: Confi
         except SlackApiError as e:
             logger.warning(
                 "Thread file upload failed (main message posted successfully): %s",
-                e.response.get("error", str(e)),
+                _slack_error_message(e),
             )
 
 
@@ -181,4 +207,4 @@ def post_failure(email_data: EmailData, error: str, config: Config) -> None:
             text=f":x: Mail Analysis Failed: {email_data.subject}",
         )
     except SlackApiError as e:
-        logger.error("Slack failure notification failed: %s", e.response["error"])
+        logger.error("Slack failure notification failed: %s", _slack_error_message(e))

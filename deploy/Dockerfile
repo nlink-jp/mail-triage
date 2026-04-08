@@ -13,4 +13,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ src/
 RUN uv sync --frozen --no-dev
 
+# Run as non-root user for security
+RUN useradd --create-home --no-log-init appuser
+USER appuser
+
 ENTRYPOINT ["uv", "run", "mail-triage"]
