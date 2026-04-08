@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mail-triage"
+version = "0.1.0"
+description = "GCS-based email analyzer with LLM classification and Slack notification"
+requires-python = ">=3.11"
+dependencies = [
+    "google-genai>=1.0,<2.0",
+    "google-cloud-storage>=2.18,<3.0",
+    "slack-sdk>=3.33,<4.0",
+    "click>=8.1,<9.0",
+    "pydantic>=2.0,<3.0",
+    "pydantic-settings>=2.0,<3.0",
+    "extract-msg>=0.52,<1.0",
+    "python-dotenv>=1.0,<2.0",
+]
+
+[project.scripts]
+mail-triage = "mail_triage.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "pyright>=1.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mail_triage"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+pythonPlatform = "All"

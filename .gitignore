@@ -1,0 +1,32 @@
+# Build artifacts
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# Credentials
+.env
+
+# Local deployment overrides
+deploy/*.local.*
+*.local.yaml
+*.local.toml
+*.local.json
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/

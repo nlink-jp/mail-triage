@@ -1,0 +1,41 @@
+# Cloud Run Job template — placeholder values only.
+# Real values go in cloudrunjob.local.yaml (gitignored).
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: mail-triage
+  labels:
+    managed-by: deploy-sh
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          containers:
+            - image: REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/mail-triage:latest
+              env:
+                - name: MAIL_TRIAGE_BUCKET
+                  value: BUCKET_NAME
+                - name: MAIL_TRIAGE_PREFIX
+                  value: inbox/
+                - name: MAIL_TRIAGE_DONE_PREFIX
+                  value: processed/
+                - name: MAIL_TRIAGE_PROJECT
+                  value: PROJECT_ID
+                - name: MAIL_TRIAGE_LOCATION
+                  value: us-central1
+                - name: MAIL_TRIAGE_MODEL
+                  value: gemini-2.5-flash
+                - name: SLACK_CHANNEL
+                  value: SLACK_CHANNEL_NAME
+                - name: SLACK_BOT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: slack-bot-token
+                      key: latest
+              resources:
+                limits:
+                  memory: 512Mi
+                  cpu: "1"
+          timeoutSeconds: 600
+          serviceAccountName: SA_EMAIL
