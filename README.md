@@ -74,7 +74,7 @@ cp deploy/deploy.env.template deploy/deploy.env
 ./deploy/deploy.sh deploy/deploy.env
 
 # 3. Add Slack bot token to Secret Manager
-echo -n 'xoxb-...' | gcloud secrets versions add mail-triage-slack-bot-token \
+echo -n 'YOUR_SLACK_BOT_TOKEN' | gcloud secrets versions add mail-triage-slack-bot-token \
   --data-file=- --project=PROJECT_ID
 ```
 
@@ -141,5 +141,7 @@ make build   # Build wheel to dist/
 
 - [README.md](README.md) (English)
 - [README.ja.md](README.ja.md) (Japanese)
+- [Architecture](docs/architecture.md) (design decisions and internals)
 - [How to Setup](docs/setup.md) (GCP / Slack prerequisites)
+- [How to Setup (ja)](docs/setup.ja.md) (GCP / Slack 事前準備)
 - [CHANGELOG.md](CHANGELOG.md)

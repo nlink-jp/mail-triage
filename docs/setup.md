@@ -1,67 +1,67 @@
 # How to Setup — mail-triage
 
-mail-triage のデプロイに必要な GCP と Slack の事前準備手順です。
-`deploy.sh` を実行する前にこのドキュメントの手順をすべて完了してください。
+Prerequisites for deploying mail-triage on GCP with Slack integration.
+Complete all steps in this document before running `deploy.sh`.
 
 ---
 
-## 目次
+## Table of Contents
 
-1. [前提条件](#前提条件)
-2. [GCP の事前準備](#gcp-の事前準備)
-3. [Slack の事前準備](#slack-の事前準備)
-4. [デプロイ設定ファイルの作成](#デプロイ設定ファイルの作成)
-5. [デプロイの実行](#デプロイの実行)
-6. [動作確認](#動作確認)
-7. [トラブルシューティング](#トラブルシューティング)
+1. [Prerequisites](#prerequisites)
+2. [GCP Setup](#gcp-setup)
+3. [Slack Setup](#slack-setup)
+4. [Create Deploy Configuration](#create-deploy-configuration)
+5. [Run Deployment](#run-deployment)
+6. [Verification](#verification)
+7. [Troubleshooting](#troubleshooting)
 
 ---
 
-## 前提条件
+## Prerequisites
 
-ローカルマシンに以下がインストールされていること:
+The following tools must be installed on your local machine:
 
-| ツール | 確認コマンド | インストール |
-|--------|-------------|-------------|
+| Tool | Verify | Install |
+|------|--------|---------|
 | Google Cloud CLI | `gcloud version` | https://cloud.google.com/sdk/docs/install |
 | Docker | `docker version` | https://docs.docker.com/get-docker/ |
-| uv (ローカル開発時) | `uv --version` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| uv (local dev only) | `uv --version` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 
 ---
 
-## GCP の事前準備
+## GCP Setup
 
-### 1. GCP プロジェクトの作成または選択
+### 1. Create or Select a GCP Project
 
-既存のプロジェクトを使うか、新規に作成します。
+Use an existing project or create a new one.
 
 ```bash
-# 新規作成の場合
+# Create a new project
 gcloud projects create PROJECT_ID --name="Mail Triage"
 
-# 既存プロジェクトを選択
+# Select an existing project
 gcloud config set project PROJECT_ID
 ```
 
-> **注意**: `PROJECT_ID` はグローバルに一意である必要があります。
+> **Note**: `PROJECT_ID` must be globally unique.
 
-### 2. 課金の有効化
+### 2. Enable Billing
 
-Cloud Run、Vertex AI、Cloud Storage はすべて課金が必要です。
+Cloud Run, Vertex AI, and Cloud Storage all require billing.
 
 ```bash
-# 課金アカウントの確認
+# List billing accounts
 gcloud billing accounts list
 
-# プロジェクトに課金アカウントを紐づけ
+# Link a billing account to your project
 gcloud billing projects link PROJECT_ID --billing-account=BILLING_ACCOUNT_ID
 ```
 
-または [Cloud Console](https://console.cloud.google.com/billing) から設定してください。
+Or configure via the [Cloud Console](https://console.cloud.google.com/billing).
 
-### 3. 必要な API の有効化
+### 3. Enable Required APIs
 
-`deploy.sh` が自動で有効化しますが、事前に手動で確認する場合:
+`deploy.sh` enables these automatically, but you can verify manually:
 
 ```bash
 gcloud services enable \
@@ -75,204 +75,204 @@ gcloud services enable \
   --project=PROJECT_ID
 ```
 
-| API | 用途 |
-|-----|------|
-| Cloud Run | ジョブの実行 |
-| Artifact Registry | コンテナイメージの保存 |
-| Eventarc | GCS イベントトリガー |
-| Cloud Scheduler | 定期スイープ |
-| Cloud Storage | メールファイルの保存 |
-| Vertex AI | Gemini LLM による分析 |
-| Secret Manager | Slack トークンの安全な保存 |
+| API | Purpose |
+|-----|---------|
+| Cloud Run | Job execution |
+| Artifact Registry | Container image storage |
+| Eventarc | GCS event triggers |
+| Cloud Scheduler | Periodic sweep |
+| Cloud Storage | Email file storage |
+| Vertex AI | Gemini LLM analysis |
+| Secret Manager | Secure Slack token storage |
 
-### 4. Vertex AI のリージョン確認
+### 4. Verify Vertex AI Region
 
-Gemini モデルが利用可能なリージョンを使用してください。
-`gemini-2.5-flash` は以下のリージョンで利用可能です:
+Use a region where the Gemini model is available.
+`gemini-2.5-flash` is available in:
 
-- `us-central1` (推奨)
+- `us-central1` (recommended)
 - `europe-west1`
-- `asia-northeast1` (東京)
+- `asia-northeast1` (Tokyo)
 
 ```bash
-# リージョンを設定
+# Set the region
 gcloud config set run/region us-central1
 ```
 
-### 5. ローカル開発用の認証設定
+### 5. Local Development Authentication
 
-ローカルでテスト実行する場合に必要です（デプロイのみなら不要）。
+Required for local test runs (not needed for deployment only).
 
 ```bash
-# ADC (Application Default Credentials) の設定
+# Set up Application Default Credentials
 gcloud auth application-default login
 
-# Docker の認証設定（deploy.sh が自動実行しますが事前でも可）
+# Configure Docker authentication (deploy.sh does this automatically)
 gcloud auth configure-docker REGION-docker.pkg.dev
 ```
 
-### 6. gcloud CLI のアカウント確認
+### 6. Verify gcloud Account Permissions
 
-`deploy.sh` を実行するアカウントに以下の権限があることを確認:
+The account running `deploy.sh` must have the following permissions:
 
-- **プロジェクトオーナー** または **編集者** (推奨: 初回セットアップ時)
-- 最低限必要な個別ロール:
-  - `roles/iam.serviceAccountAdmin` — SA 作成
-  - `roles/resourcemanager.projectIamAdmin` — IAM バインディング
-  - `roles/storage.admin` — バケット作成
-  - `roles/artifactregistry.admin` — リポジトリ作成
-  - `roles/run.admin` — Cloud Run Job 作成
-  - `roles/eventarc.admin` — トリガー作成
-  - `roles/cloudscheduler.admin` — スケジューラ作成
-  - `roles/secretmanager.admin` — シークレット作成
+- **Project Owner** or **Editor** (recommended for initial setup)
+- Minimum required individual roles:
+  - `roles/iam.serviceAccountAdmin` — Create service accounts
+  - `roles/resourcemanager.projectIamAdmin` — IAM bindings
+  - `roles/storage.admin` — Create buckets
+  - `roles/artifactregistry.admin` — Create repositories
+  - `roles/run.admin` — Create Cloud Run Jobs
+  - `roles/eventarc.admin` — Create triggers
+  - `roles/cloudscheduler.admin` — Create schedulers
+  - `roles/secretmanager.admin` — Create secrets
 
 ```bash
-# 現在の認証アカウントを確認
+# Verify the authenticated account
 gcloud auth list
 ```
 
 ---
 
-## Slack の事前準備
+## Slack Setup
 
-### 1. Slack App の作成
+### 1. Create a Slack App
 
-1. [Slack API: Your Apps](https://api.slack.com/apps) にアクセス
-2. **Create New App** → **From scratch** を選択
-3. App Name: `mail-triage`（任意）
-4. Workspace: 投稿先のワークスペースを選択
-5. **Create App** をクリック
+1. Go to [Slack API: Your Apps](https://api.slack.com/apps)
+2. Click **Create New App** → **From scratch**
+3. App Name: `mail-triage` (or any name you prefer)
+4. Workspace: Select the workspace where notifications will be posted
+5. Click **Create App**
 
-### 2. Bot Token Scopes の設定
+### 2. Configure Bot Token Scopes
 
-1. 左メニューの **OAuth & Permissions** を開く
-2. **Scopes** セクションの **Bot Token Scopes** で以下を追加:
+1. Open **OAuth & Permissions** from the left menu
+2. Under **Scopes** → **Bot Token Scopes**, add:
 
-| Scope | 用途 |
-|-------|------|
-| `chat:write` | チャンネルへのメッセージ投稿 |
-| `files:write` | スレッドへのファイル添付（メール本文） |
+| Scope | Purpose |
+|-------|---------|
+| `chat:write` | Post messages to channels |
+| `files:write` | Attach files to threads (email body) |
 
-> **注意**: `files:read` は不要です。アップロードのみ行います。
+> **Note**: `files:read` is not required. Only uploads are performed.
 
-### 3. App のインストール
+### 3. Install the App
 
-1. **OAuth & Permissions** ページ上部の **Install to Workspace** をクリック
-2. 権限を確認して **Allow** をクリック
-3. 表示される **Bot User OAuth Token** (`xoxb-` で始まる文字列) をコピー
+1. Click **Install to Workspace** at the top of the **OAuth & Permissions** page
+2. Review permissions and click **Allow**
+3. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
 
-> このトークンは後で Secret Manager に登録します。安全な場所に一時保管してください。
+> Store this token securely. You will register it in Secret Manager later.
 
-### 4. Bot をチャンネルに招待
+### 4. Invite the Bot to a Channel
 
-投稿先のチャンネルに Bot を追加します:
+Add the bot to the target notification channel:
 
 ```
-# Slack のチャンネルで以下を入力
+# Type in the Slack channel
 /invite @mail-triage
 ```
 
-または:
-1. チャンネル設定 → **Integrations** → **Apps** → **Add apps**
-2. `mail-triage` を検索して追加
+Or:
+1. Channel settings → **Integrations** → **Apps** → **Add apps**
+2. Search for `mail-triage` and add it
 
-> Bot が招待されていないチャンネルには投稿できません（`not_in_channel` エラー）。
+> The bot cannot post to channels it has not been invited to (`not_in_channel` error).
 
-### 5. チャンネル ID の確認（オプション）
+### 5. Find Channel ID (Optional)
 
-`SLACK_CHANNEL` にはチャンネル名（`#mail-digest`）またはチャンネル ID（`C01XXXXXXXX`）を指定できます。
-チャンネル ID を使う方が確実です。
+`SLACK_CHANNEL` accepts either a channel name (`#mail-digest`) or a channel ID (`C01XXXXXXXX`).
+Using the channel ID is more reliable.
 
-確認方法:
-1. Slack でチャンネルを開く
-2. チャンネル名をクリック → 最下部に **Channel ID** が表示される
+How to find the Channel ID:
+1. Open the channel in Slack
+2. Click the channel name → the **Channel ID** is shown at the bottom
 
 ---
 
-## デプロイ設定ファイルの作成
+## Create Deploy Configuration
 
 ```bash
 cd mail-triage
 cp deploy/deploy.env.template deploy/deploy.env
 ```
 
-`deploy/deploy.env` を編集:
+Edit `deploy/deploy.env`:
 
 ```bash
-# ── 必須 ──
-PROJECT_ID=your-gcp-project-id      # GCP プロジェクト ID
-REGION=us-central1                   # Cloud Run / Vertex AI リージョン
-BUCKET_NAME=your-mail-triage-bucket  # メールファイル格納用 GCS バケット名
-SLACK_CHANNEL=#mail-digest           # Slack 通知先チャンネル
+# ── Required ──
+PROJECT_ID=your-gcp-project-id      # GCP project ID
+REGION=us-central1                   # Cloud Run / Vertex AI region
+BUCKET_NAME=your-mail-triage-bucket  # GCS bucket for email files
+SLACK_CHANNEL=#mail-digest           # Slack notification channel
 
-# ── 任意（デフォルト値あり） ──
-# SCHEDULER_CRON="*/30 * * * *"      # スイープ間隔（デフォルト: 30分毎）
-# SCHEDULER_TZ=Asia/Tokyo            # タイムゾーン
-# SUMMARY_LANG=ja                    # サマリ言語の強制指定
-# GEMINI_MODEL=gemini-2.5-flash      # Gemini モデル名
-# JOB_TIMEOUT=600                    # ジョブタイムアウト（秒）
-# JOB_MEMORY=512Mi                   # メモリ上限
+# ── Optional (defaults shown) ──
+# SCHEDULER_CRON="*/30 * * * *"      # Sweep interval (default: every 30 min)
+# SCHEDULER_TZ=Asia/Tokyo            # Timezone
+# SUMMARY_LANG=ja                    # Force summary language
+# GEMINI_MODEL=gemini-2.5-flash      # Gemini model name
+# JOB_TIMEOUT=600                    # Job timeout (seconds)
+# JOB_MEMORY=512Mi                   # Memory limit
 ```
 
-> **重要**: `deploy/deploy.env` は `.gitignore` に含まれています。絶対にコミットしないでください。
+> **Important**: `deploy/deploy.env` is in `.gitignore`. Never commit it.
 
 ---
 
-## デプロイの実行
+## Run Deployment
 
 ```bash
-# 1. デプロイ（全リソースをまとめて構築）
+# 1. Deploy all resources
 ./deploy/deploy.sh deploy/deploy.env
 
-# 2. Slack Bot トークンを Secret Manager に登録
-echo -n 'xoxb-your-bot-token-here' | \
+# 2. Register Slack bot token in Secret Manager
+echo -n 'YOUR_SLACK_BOT_TOKEN' | \
   gcloud secrets versions add mail-triage-slack-bot-token \
     --data-file=- --project=PROJECT_ID
 ```
 
-`deploy.sh` が作成するリソース:
+Resources created by `deploy.sh`:
 
-| リソース | 名前 |
-|---------|------|
-| サービスアカウント | `mail-triage-sa@PROJECT_ID.iam.gserviceaccount.com` |
-| GCS バケット | `gs://BUCKET_NAME` |
+| Resource | Name |
+|----------|------|
+| Service Account | `mail-triage-sa@PROJECT_ID.iam.gserviceaccount.com` |
+| GCS Bucket | `gs://BUCKET_NAME` |
 | Artifact Registry | `REGION-docker.pkg.dev/PROJECT_ID/mail-triage/` |
 | Cloud Run Job | `mail-triage` |
-| Eventarc トリガー | `mail-triage-gcs-trigger` |
+| Eventarc Trigger | `mail-triage-gcs-trigger` |
 | Cloud Scheduler | `mail-triage-sweep` |
 | Secret | `mail-triage-slack-bot-token` |
 
 ---
 
-## 動作確認
+## Verification
 
-### テストメールのアップロード
+### Upload a Test Email
 
 ```bash
-# .eml ファイルをバケットの inbox/ にアップロード
+# Upload an .eml file to the inbox/ prefix
 gcloud storage cp test.eml gs://BUCKET_NAME/inbox/
 
-# Eventarc トリガーにより自動的にジョブが起動される
-# 数秒〜数十秒で Slack にメッセージが届く
+# The Eventarc trigger will automatically start the job
+# A Slack message should arrive within seconds
 ```
 
-### ジョブ実行状況の確認
+### Check Job Execution Status
 
 ```bash
-# 最新の実行一覧
+# List recent executions
 gcloud run jobs executions list \
   --job=mail-triage \
   --region=REGION \
   --project=PROJECT_ID
 
-# 特定の実行のログ
+# View logs for a specific execution
 gcloud run jobs executions logs EXECUTION_NAME \
   --job=mail-triage \
   --region=REGION \
   --project=PROJECT_ID
 ```
 
-### 手動でスイープ実行
+### Manual Sweep Execution
 
 ```bash
 gcloud run jobs execute mail-triage \
@@ -280,54 +280,54 @@ gcloud run jobs execute mail-triage \
   --project=PROJECT_ID
 ```
 
-### 処理済みファイルの確認
+### Verify Processed Files
 
 ```bash
-# inbox/ から processed/ に移動されていることを確認
+# Confirm files moved from inbox/ to processed/
 gcloud storage ls gs://BUCKET_NAME/inbox/
 gcloud storage ls gs://BUCKET_NAME/processed/
 ```
 
 ---
 
-## トラブルシューティング
+## Troubleshooting
 
-### Slack 関連
+### Slack
 
-| エラー | 原因 | 対処 |
-|--------|------|------|
-| `not_in_channel` | Bot がチャンネルに招待されていない | `/invite @mail-triage` でチャンネルに追加 |
-| `invalid_auth` | トークンが無効または未設定 | Secret Manager のトークン値を確認 |
-| `channel_not_found` | チャンネル名/ID が間違っている | チャンネル ID（`C01XXX`）を直接指定する |
-| `missing_scope` | 必要な scope が不足 | Slack App の OAuth & Permissions で scope を追加し、再インストール |
-| `ratelimited` | API レート制限 | 自動リトライされるが、大量処理時は `SCHEDULER_CRON` の間隔を広げる |
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `not_in_channel` | Bot not invited to the channel | Run `/invite @mail-triage` in the channel |
+| `invalid_auth` | Token invalid or not set | Verify the token value in Secret Manager |
+| `channel_not_found` | Incorrect channel name/ID | Use channel ID (`C01XXX`) instead of name |
+| `missing_scope` | Required scope not granted | Add the scope in OAuth & Permissions, then reinstall the app |
+| `ratelimited` | API rate limit | Automatic retry handles this; increase `SCHEDULER_CRON` interval for heavy loads |
 
-### Gemini 関連
+### Gemini
 
-| エラー | 原因 | 対処 |
-|--------|------|------|
-| `PERMISSION_DENIED` | Vertex AI API が未有効または SA に権限なし | `gcloud services enable aiplatform.googleapis.com` + IAM 確認 |
-| `RESOURCE_EXHAUSTED` / 429 | クォータ超過 | 自動リトライ（最大6回）。頻発する場合はクォータ引き上げを申請 |
-| `NOT_FOUND` | モデル名またはリージョンが無効 | `GEMINI_MODEL` と `REGION` を確認 |
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `PERMISSION_DENIED` | Vertex AI API not enabled or SA lacks permissions | `gcloud services enable aiplatform.googleapis.com` + verify IAM |
+| `RESOURCE_EXHAUSTED` / 429 | Quota exceeded | Automatic retry (up to 6 attempts). Request a quota increase if frequent |
+| `NOT_FOUND` | Invalid model name or region | Verify `GEMINI_MODEL` and `REGION` |
 
-### GCS 関連
+### GCS
 
-| エラー | 原因 | 対処 |
-|--------|------|------|
-| `403 Forbidden` | SA にバケットへのアクセス権がない | `roles/storage.objectAdmin` が付与されているか確認 |
-| `404 Not Found` | バケットまたはオブジェクトが存在しない | バケット名とプレフィックスを確認 |
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `403 Forbidden` | SA lacks bucket access | Verify `roles/storage.objectAdmin` is granted |
+| `404 Not Found` | Bucket or object does not exist | Check bucket name and prefix |
 
-### Eventarc 関連
+### Eventarc
 
-| エラー | 原因 | 対処 |
-|--------|------|------|
-| トリガーが発火しない | GCS サービスアカウントに `pubsub.publisher` ロールがない | `deploy.sh` が設定するが、手動確認: `gcloud projects get-iam-policy PROJECT_ID` |
-| 重複実行 | Eventarc + Scheduler の両方が同じファイルを処理 | 正常動作（Eventarc が先に処理 → Scheduler は空振り） |
+| Error | Cause | Fix |
+|-------|-------|-----|
+| Trigger not firing | GCS service account lacks `pubsub.publisher` role | `deploy.sh` sets this up, but verify manually: `gcloud projects get-iam-policy PROJECT_ID` |
+| Duplicate execution | Both Eventarc and Scheduler process the same file | Normal behavior (Eventarc processes first → Scheduler finds nothing new) |
 
-### 共通
+### General
 
 ```bash
-# Cloud Run Job のログを確認
+# View Cloud Run Job logs
 gcloud logging read \
   "resource.type=cloud_run_job AND resource.labels.job_name=mail-triage" \
   --project=PROJECT_ID \

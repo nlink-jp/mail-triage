@@ -135,7 +135,7 @@ SECRET_NAME="mail-triage-slack-bot-token"
 if ! gcloud secrets describe "$SECRET_NAME" --project="$PROJECT_ID" &>/dev/null; then
   log "Creating secret: $SECRET_NAME"
   log "You will need to add the secret value manually:"
-  log "  echo -n 'xoxb-...' | gcloud secrets versions add $SECRET_NAME --data-file=- --project=$PROJECT_ID"
+  log "  echo -n 'YOUR_SLACK_BOT_TOKEN' | gcloud secrets versions add $SECRET_NAME --data-file=- --project=$PROJECT_ID"
   gcloud secrets create "$SECRET_NAME" --project="$PROJECT_ID" --replication-policy=automatic
 else
   log "Secret already exists: $SECRET_NAME"
@@ -251,7 +251,7 @@ log "  SA:           ${SA_EMAIL}"
 log ""
 log "Next steps:"
 log "  1. Add Slack bot token to Secret Manager:"
-log "     echo -n 'xoxb-...' | gcloud secrets versions add ${SECRET_NAME} --data-file=- --project=${PROJECT_ID}"
+log "     echo -n 'YOUR_SLACK_BOT_TOKEN' | gcloud secrets versions add ${SECRET_NAME} --data-file=- --project=${PROJECT_ID}"
 log "  2. Upload an email file to test:"
 log "     gcloud storage cp test.eml gs://${BUCKET_NAME}/${INPUT_PREFIX}"
 log "  3. Check job execution:"
