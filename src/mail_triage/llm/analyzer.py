@@ -1,9 +1,16 @@
-"""Gemini LLM email analyzer with retry logic."""
+"""Gemini LLM email analyzer with retry logic.
+
+Rate limit handling:
+- Exponential backoff with ±1s jitter on 429/resource_exhausted/5xx errors.
+- Delay sequence: 5s, 10s, 20s, 40s, 80s, 120s (capped).
+- Max 6 attempts total (initial + 5 retries).
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import random
 import time
 
 from google import genai
@@ -19,6 +26,7 @@ logger = logging.getLogger(__name__)
 _MAX_RETRIES = 5
 _BASE_DELAY = 5.0
 _MAX_DELAY = 120.0
+_JITTER = 1.0
 
 
 def _create_client(config: Config) -> genai.Client:
@@ -130,6 +138,8 @@ def analyze_email(email_data: EmailData, config: Config) -> AnalysisResult:
                 raise
 
             delay = min(_BASE_DELAY * (2**attempt), _MAX_DELAY)
+            jitter = random.uniform(-_JITTER, _JITTER)
+            delay = max(0, delay + jitter)
             logger.warning("LLM call failed (attempt %d/%d), retrying in %.1fs: %s", attempt + 1, _MAX_RETRIES + 1, delay, e)
             time.sleep(delay)
 

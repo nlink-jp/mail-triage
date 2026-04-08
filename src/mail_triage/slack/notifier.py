@@ -1,16 +1,43 @@
-"""Slack Block Kit notification for email analysis results."""
+"""Slack Block Kit notification for email analysis results.
+
+Rate limit handling:
+- slack_sdk's built-in RateLimitErrorRetryHandler automatically retries
+  on 429 responses, respecting the Retry-After header from Slack.
+- A per-call throttle (_throttle) adds a minimum interval between API calls
+  to stay well within Slack's Tier 3 limit (~50 req/min for chat.postMessage).
+"""
 
 from __future__ import annotations
 
 import logging
+import time
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
 
 from mail_triage.config import Config
 from mail_triage.models import AnalysisResult, Category, EmailData, Priority
 
 logger = logging.getLogger(__name__)
+
+# Minimum seconds between Slack API calls to avoid hitting rate limits
+# during batch processing. Slack Tier 3 allows ~50 req/min ≈ 1.2s/req.
+# We use 1.5s for safety margin.
+_MIN_INTERVAL = 1.5
+_last_call_time: float = 0.0
+
+
+def _throttle() -> None:
+    """Ensure minimum interval between Slack API calls."""
+    global _last_call_time
+    now = time.monotonic()
+    elapsed = now - _last_call_time
+    if _last_call_time > 0 and elapsed < _MIN_INTERVAL:
+        wait = _MIN_INTERVAL - elapsed
+        logger.debug("Throttling Slack API call for %.1fs", wait)
+        time.sleep(wait)
+    _last_call_time = time.monotonic()
 
 CATEGORY_EMOJI: dict[Category, str] = {
     Category.SECURITY_ALERT: ":rotating_light:",
@@ -100,7 +127,10 @@ def _build_failure_blocks(email_data: EmailData, error: str) -> list[dict]:
 
 
 def _get_client(config: Config) -> WebClient:
-    return WebClient(token=config.slack_bot_token)
+    client = WebClient(token=config.slack_bot_token)
+    # Automatically retry on 429 (rate limited) using Retry-After header
+    client.retry_handlers.append(RateLimitErrorRetryHandler(max_retry_count=3))
+    return client
 
 
 def post_analysis(email_data: EmailData, analysis: AnalysisResult, config: Config) -> None:
@@ -109,6 +139,7 @@ def post_analysis(email_data: EmailData, analysis: AnalysisResult, config: Confi
     blocks = _build_success_blocks(email_data, analysis)
 
     try:
+        _throttle()
         result = client.chat_postMessage(
             channel=config.slack_channel,
             blocks=blocks,
@@ -122,6 +153,7 @@ def post_analysis(email_data: EmailData, analysis: AnalysisResult, config: Confi
     # This is best-effort — if it fails, the main notification already succeeded.
     if email_data.body and result.get("ts"):
         try:
+            _throttle()
             client.files_upload_v2(
                 channel=config.slack_channel,
                 thread_ts=result["ts"],
@@ -142,6 +174,7 @@ def post_failure(email_data: EmailData, error: str, config: Config) -> None:
     blocks = _build_failure_blocks(email_data, error)
 
     try:
+        _throttle()
         client.chat_postMessage(
             channel=config.slack_channel,
             blocks=blocks,
